@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseKiroStdout, parseKiroCredits, isKiroAuthRequired } from "./parse.js";
+import { parseKiroStdout, parseKiroCredits, isKiroAuthRequired, generateSessionMarker, matchSessionByMarker } from "./parse.js";
 
 describe("parseKiroStdout", () => {
   it("strips the > prefix from assistant response lines", () => {
@@ -90,5 +90,50 @@ describe("parseKiroCredits", () => {
     const result = parseKiroCredits(stderr);
     expect(result.credits).toBe(0.07);
     expect(result.timeSec).toBeNull();
+  });
+});
+
+describe("generateSessionMarker", () => {
+  it("generates a short marker starting with pcsid:", () => {
+    const marker = generateSessionMarker();
+    expect(marker).toMatch(/^pcsid:[a-f0-9]{6}[a-z0-9]+$/);
+    expect(marker.length).toBeLessThan(25);
+  });
+
+  it("generates unique markers", () => {
+    const a = generateSessionMarker();
+    const b = generateSessionMarker();
+    expect(a).not.toBe(b);
+  });
+});
+
+describe("matchSessionByMarker", () => {
+  it("finds the session ID matching the marker in list-sessions output", () => {
+    const output = `
+Chat sessions for /Users/user/project:
+
+Chat SessionId: 87117d77-e6b4-47a5-a483-2a90edee8b95
+  0 seconds ago | [pcsid:abc123lz5] You are agent agent-1... | 2 msgs | v1
+
+Chat SessionId: cd40197b-bdac-4bd0-adda-5cb2753648b5
+  5 minutes ago | Some other prompt | 2 msgs | v1
+`;
+    const result = matchSessionByMarker(output, "pcsid:abc123lz5");
+    expect(result).toBe("87117d77-e6b4-47a5-a483-2a90edee8b95");
+  });
+
+  it("returns null when no session matches the marker", () => {
+    const output = `
+Chat sessions for /Users/user/project:
+
+Chat SessionId: 87117d77-e6b4-47a5-a483-2a90edee8b95
+  0 seconds ago | Some unrelated prompt | 2 msgs | v1
+`;
+    const result = matchSessionByMarker(output, "pcsid:xyz789");
+    expect(result).toBeNull();
+  });
+
+  it("returns null for empty output", () => {
+    expect(matchSessionByMarker("", "pcsid:abc123")).toBeNull();
   });
 });

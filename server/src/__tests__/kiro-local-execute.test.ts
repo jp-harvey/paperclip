@@ -15,31 +15,52 @@ async function writeFakeKiroCommand(commandPath: string): Promise<void> {
 const fs = require("node:fs");
 
 const capturePath = process.env.PAPERCLIP_TEST_CAPTURE_PATH;
-const payload = {
-  argv: process.argv.slice(2),
-  env: {
-    KIRO_API_KEY: process.env.KIRO_API_KEY || null,
-    PAPERCLIP_AGENT_ID: process.env.PAPERCLIP_AGENT_ID || null,
-    PAPERCLIP_COMPANY_ID: process.env.PAPERCLIP_COMPANY_ID || null,
-    PAPERCLIP_RUN_ID: process.env.PAPERCLIP_RUN_ID || null,
-    PAPERCLIP_API_KEY: process.env.PAPERCLIP_API_KEY || null,
-    PAPERCLIP_TASK_ID: process.env.PAPERCLIP_TASK_ID || null,
-    PAPERCLIP_WAKE_REASON: process.env.PAPERCLIP_WAKE_REASON || null,
-    PAPERCLIP_WORKSPACE_CWD: process.env.PAPERCLIP_WORKSPACE_CWD || null,
-  },
-  paperclipEnvKeys: Object.keys(process.env)
-    .filter((key) => key.startsWith("PAPERCLIP_"))
-    .sort(),
-};
-if (capturePath) {
+const argv = process.argv.slice(2);
+
+// Only capture args for the actual chat invocation, not --list-sessions
+const isListSessions = argv.includes("--list-sessions");
+
+if (capturePath && !isListSessions) {
+  const payload = {
+    argv,
+    env: {
+      KIRO_API_KEY: process.env.KIRO_API_KEY || null,
+      PAPERCLIP_AGENT_ID: process.env.PAPERCLIP_AGENT_ID || null,
+      PAPERCLIP_COMPANY_ID: process.env.PAPERCLIP_COMPANY_ID || null,
+      PAPERCLIP_RUN_ID: process.env.PAPERCLIP_RUN_ID || null,
+      PAPERCLIP_API_KEY: process.env.PAPERCLIP_API_KEY || null,
+      PAPERCLIP_TASK_ID: process.env.PAPERCLIP_TASK_ID || null,
+      PAPERCLIP_WAKE_REASON: process.env.PAPERCLIP_WAKE_REASON || null,
+      PAPERCLIP_WORKSPACE_CWD: process.env.PAPERCLIP_WORKSPACE_CWD || null,
+    },
+    paperclipEnvKeys: Object.keys(process.env)
+      .filter((key) => key.startsWith("PAPERCLIP_"))
+      .sort(),
+  };
   fs.writeFileSync(capturePath, JSON.stringify(payload), "utf8");
 }
-// Mimic real kiro-cli output format:
-// stderr: trust banner + credits
-process.stderr.write("All tools are now trusted (!)\\n\\n");
-process.stderr.write(" ▸ Credits: 0.04 • Time: 1s\\n");
-// stdout: assistant response with > prefix
-console.log("> I've completed the task successfully.");
+
+if (isListSessions) {
+  // Find the marker from the prompt in the capture file to return a matching session
+  let marker = "";
+  try {
+    const captured = JSON.parse(fs.readFileSync(capturePath, "utf8"));
+    const prompt = captured.argv[captured.argv.length - 1] || "";
+    const m = prompt.match(/\\[pcsid:[^\\]]+\\]/);
+    if (m) marker = m[0].slice(1, -1); // strip brackets
+  } catch {}
+  console.log("Chat sessions for /tmp/test:");
+  console.log("");
+  console.log("Chat SessionId: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+  console.log("  0 seconds ago | " + (marker ? "[" + marker + "] " : "") + "prompt preview | 2 msgs | v1");
+  process.exit(0);
+} else {
+  // Mimic real kiro-cli output format
+  process.stderr.write("All tools are now trusted (!)\\n\\n");
+  process.stderr.write(" ▸ Credits: 0.04 • Time: 1s\\n");
+  console.log("> I've completed the task successfully.");
+  process.exit(0);
+}
 `;
   await fs.writeFile(commandPath, script, "utf8");
   await fs.chmod(commandPath, 0o755);
@@ -104,6 +125,8 @@ describe("kiro execute", () => {
       expect(result.summary).toBe("I've completed the task successfully.");
       // Credits parsed from stderr
       expect(result.costUsd).toBe(0.04);
+      // Session discovered from --list-sessions
+      expect(result.sessionId).toBe("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
 
       const capture = JSON.parse(await fs.readFile(capturePath, "utf8")) as CapturePayload;
       expect(capture.argv).toContain("chat");

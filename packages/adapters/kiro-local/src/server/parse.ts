@@ -76,3 +76,77 @@ export function isKiroAuthRequired(stdout: string, stderr: string): boolean {
   const haystack = `${stdout}\n${stderr}`;
   return KIRO_AUTH_REQUIRED_RE.test(haystack);
 }
+
+// ---------------------------------------------------------------------------
+// Session discovery via --list-sessions
+// ---------------------------------------------------------------------------
+
+const SESSION_LINE_RE = /Chat SessionId:\s*([0-9a-f-]{36})/i;
+
+/**
+ * Generate a short session marker to prepend to the prompt.
+ * Format: `pcsid:<6 hex chars><unix seconds>` — short enough to be
+ * negligible in the context window, unique enough to match in --list-sessions.
+ */
+export function generateSessionMarker(): string {
+  const hex = Math.random().toString(16).slice(2, 8);
+  const ts = Math.floor(Date.now() / 1000).toString(36);
+  return `pcsid:${hex}${ts}`;
+}
+
+/**
+ * Parse `kiro-cli chat --list-sessions` output and find the session
+ * whose prompt preview contains the given marker.
+ */
+export function matchSessionByMarker(
+  listOutput: string,
+  marker: string,
+): string | null {
+  const lines = listOutput.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const idMatch = line.match(SESSION_LINE_RE);
+    if (!idMatch) continue;
+    // The next line(s) contain the prompt preview — check the surrounding
+    // context for our marker. list-sessions format:
+    //   Chat SessionId: <uuid>
+    //     <time ago> | <prompt preview> | <N msgs> | <version>
+    const nextLine = lines[i + 1] ?? "";
+    if (nextLine.includes(marker)) {
+      return idMatch[1]!;
+    }
+  }
+  return null;
+}
+
+/**
+ * Run `kiro-cli chat --list-sessions` and extract the session ID whose
+ * prompt contains the given marker. Returns null if not found or if the
+ * command fails.
+ */
+export async function discoverSessionId(
+  command: string,
+  cwd: string,
+  env: Record<string, string>,
+  marker: string,
+  runChildProcessFn: typeof import("@paperclipai/adapter-utils/server-utils").runChildProcess,
+): Promise<string | null> {
+  try {
+    const proc = await runChildProcessFn(
+      `kiro-session-discover-${Date.now()}`,
+      command,
+      ["chat", "--list-sessions"],
+      {
+        cwd,
+        env,
+        timeoutSec: 10,
+        graceSec: 2,
+        onLog: async () => {},
+      },
+    );
+    if ((proc.exitCode ?? 1) !== 0) return null;
+    return matchSessionByMarker(proc.stdout, marker);
+  } catch {
+    return null;
+  }
+}

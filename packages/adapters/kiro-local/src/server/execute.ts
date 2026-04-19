@@ -17,7 +17,7 @@ import {
   joinPromptSections,
   runChildProcess,
 } from "@paperclipai/adapter-utils/server-utils";
-import { parseKiroStdout, parseKiroCredits } from "./parse.js";
+import { parseKiroStdout, parseKiroCredits, discoverSessionId, generateSessionMarker } from "./parse.js";
 import { buildKiroExecArgs } from "./kiro-args.js";
 
 function firstNonEmptyLine(text: string): string {
@@ -201,8 +201,14 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     sessionHandoffNote,
     renderedPrompt,
   ]);
+
+  // For fresh sessions (no resume), prepend a short marker so we can
+  // discover the session ID from `--list-sessions` after the run.
+  // The marker is ~20 chars — negligible in the context window.
+  const sessionMarker = sessionId ? null : generateSessionMarker();
+  const finalPrompt = sessionMarker ? `[${sessionMarker}] ${prompt}` : prompt;
   const promptMetrics = {
-    promptChars: prompt.length,
+    promptChars: finalPrompt.length,
     instructionsChars,
     wakePromptChars: wakePrompt.length,
     sessionHandoffChars: sessionHandoffNote.length,
@@ -210,7 +216,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   };
 
   const execArgs = buildKiroExecArgs(config, { resumeSessionId: sessionId });
-  const args = [...execArgs.args, prompt];
+  const args = [...execArgs.args, finalPrompt];
 
   if (onMeta) {
     await onMeta({
@@ -218,11 +224,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       command: resolvedCommand,
       cwd,
       commandArgs: args.map((value, idx) => {
-        if (idx === args.length - 1) return `<prompt ${prompt.length} chars>`;
+        if (idx === args.length - 1) return `<prompt ${finalPrompt.length} chars>`;
         return value;
       }),
       env: loggedEnv,
-      prompt,
+      prompt: finalPrompt,
       promptMetrics,
       context,
     });
@@ -239,6 +245,32 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   const parsed = parseKiroStdout(proc.stdout);
   const credits = parseKiroCredits(proc.stderr);
+
+  // Discover the session ID for fresh sessions by matching our marker
+  // in the --list-sessions output. Skip for resumed sessions (we already
+  // have the ID) and failed/timed-out runs.
+  let discoveredSessionId: string | null = null;
+  if (
+    sessionMarker &&
+    !proc.timedOut &&
+    (proc.exitCode ?? 0) === 0
+  ) {
+    discoveredSessionId = await discoverSessionId(
+      command,
+      cwd,
+      env,
+      sessionMarker,
+      runChildProcess,
+    );
+    if (discoveredSessionId) {
+      await onLog(
+        "stdout",
+        `[paperclip] Discovered Kiro session "${discoveredSessionId}" for next resume.\n`,
+      );
+    }
+  }
+
+  const resolvedSessionId = discoveredSessionId ?? (runtimeSessionId || null);
 
   if (proc.timedOut) {
     return {
@@ -260,13 +292,13 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     signal: proc.signal,
     timedOut: false,
     errorMessage: (proc.exitCode ?? 0) === 0 ? null : fallbackErrorMessage,
-    // Kiro CLI does not expose session IDs in output; pass through the
-    // runtime session so Paperclip can attempt --resume-id on the next run.
-    sessionId: runtimeSessionId || null,
-    sessionParams: runtimeSessionId
-      ? { sessionId: runtimeSessionId, cwd } as Record<string, unknown>
+    // Session tracking: use discovered ID from fresh runs, or pass through
+    // the existing runtime session for resumed runs.
+    sessionId: resolvedSessionId,
+    sessionParams: resolvedSessionId
+      ? { sessionId: resolvedSessionId, cwd } as Record<string, unknown>
       : null,
-    sessionDisplayId: runtimeSessionId || null,
+    sessionDisplayId: resolvedSessionId,
     provider: "kiro",
     biller: "kiro",
     model: asString(config.model, ""),
