@@ -64,6 +64,11 @@ const adapterDisplayMap: Record<string, AdapterDisplayInfo> = {
     icon: Code,
     recommended: true,
   },
+  kiro_local: {
+    label: "Kiro CLI",
+    description: "Local Kiro CLI agent",
+    icon: Sparkles,
+  },
   gemini_local: {
     label: "Gemini CLI",
     description: "Local Gemini agent",

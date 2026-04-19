@@ -69,6 +69,12 @@ import {
   agentConfigurationDoc as piAgentConfigurationDoc,
 } from "@paperclipai/adapter-pi-local";
 import {
+  execute as kiroExecute,
+  testEnvironment as kiroTestEnvironment,
+  sessionCodec as kiroSessionCodec,
+} from "@paperclipai/adapter-kiro-local/server";
+import { agentConfigurationDoc as kiroAgentConfigurationDoc, models as kiroModels } from "@paperclipai/adapter-kiro-local";
+import {
   execute as hermesExecute,
   testEnvironment as hermesTestEnvironment,
   sessionCodec as hermesSessionCodec,
@@ -200,6 +206,20 @@ const piLocalAdapter: ServerAdapterModule = {
   agentConfigurationDoc: piAgentConfigurationDoc,
 };
 
+const kiroLocalAdapter: ServerAdapterModule = {
+  type: "kiro_local",
+  execute: kiroExecute,
+  testEnvironment: kiroTestEnvironment,
+  sessionCodec: kiroSessionCodec,
+  sessionManagement: getAdapterSessionManagement("kiro_local") ?? undefined,
+  models: kiroModels,
+  supportsLocalAgentJwt: false,
+  supportsInstructionsBundle: true,
+  instructionsPathKey: "instructionsFilePath",
+  requiresMaterializedRuntimeSkills: false,
+  agentConfigurationDoc: kiroAgentConfigurationDoc,
+};
+
 const hermesLocalAdapter: ServerAdapterModule = {
   type: "hermes_local",
   execute: hermesExecute,
@@ -233,6 +253,7 @@ function registerBuiltInAdapters() {
     codexLocalAdapter,
     openCodeLocalAdapter,
     piLocalAdapter,
+    kiroLocalAdapter,
     cursorLocalAdapter,
     geminiLocalAdapter,
     openclawGatewayAdapter,
