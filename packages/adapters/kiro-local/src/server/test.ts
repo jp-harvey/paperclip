@@ -33,9 +33,11 @@ function commandLooksLike(command: string, expected: string): boolean {
 }
 
 function summarizeProbeDetail(stdout: string, stderr: string): string | null {
-  const raw = firstNonEmptyLine(stderr) || firstNonEmptyLine(stdout);
+  // Prefer stdout (the actual response) over stderr (trust banner/credits)
+  const raw = firstNonEmptyLine(stdout) || firstNonEmptyLine(stderr);
   if (!raw) return null;
-  const clean = raw.replace(/\s+/g, " ").trim();
+  // Strip ANSI escape codes for clean display
+  const clean = raw.replace(/\x1b\[[0-9;]*m/g, "").replace(/\s+/g, " ").trim();
   const max = 240;
   return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
 }
@@ -176,7 +178,8 @@ export async function testEnvironment(
           hint: "Retry the probe. If this persists, verify Kiro CLI can run from this directory manually.",
         });
       } else if ((probe.exitCode ?? 1) === 0) {
-        const hasHello = /\bhello\b/i.test(probe.stdout);
+        const cleanStdout = probe.stdout.replace(/\x1b\[[0-9;]*m/g, "");
+        const hasHello = /\bhello\b/i.test(cleanStdout);
         checks.push({
           code: hasHello ? "kiro_hello_probe_passed" : "kiro_hello_probe_unexpected_output",
           level: hasHello ? "info" : "warn",
