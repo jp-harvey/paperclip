@@ -19,6 +19,7 @@ import {
 } from "@paperclipai/adapter-utils/server-utils";
 import { parseKiroStdout, parseKiroCredits, discoverSessionId, generateSessionMarker, checkKiroAuth } from "./parse.js";
 import { buildKiroExecArgs } from "./kiro-args.js";
+import { ensureKiroSkillsInjected } from "./skills.js";
 
 import { firstNonEmptyLine } from "./utils.js";
 
@@ -153,6 +154,9 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       };
     }
   }
+
+  // Inject Paperclip-managed skills into .kiro/skills/ before execution
+  await ensureKiroSkillsInjected(cwd, parseObject(config), onLog);
 
   // Kiro CLI does not expose session IDs in stdout/stderr — they are stored
   // internally and only visible via `kiro-cli chat --list-sessions`. We still
