@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sessionCodec as claudeSessionCodec } from "@paperclipai/adapter-claude-local/server";
 import { sessionCodec as codexSessionCodec, isCodexUnknownSessionError } from "@paperclipai/adapter-codex-local/server";
+import { sessionCodec as kiroSessionCodec } from "@paperclipai/adapter-kiro-local/server";
 import {
   sessionCodec as cursorSessionCodec,
   isCursorUnknownSessionError,
@@ -106,6 +107,24 @@ describe("adapter session codecs", () => {
       cwd: "/tmp/gemini",
     });
     expect(geminiSessionCodec.getDisplayId?.(serialized ?? null)).toBe("gemini-session-1");
+  });
+
+  it("normalizes kiro session params with cwd", () => {
+    const parsed = kiroSessionCodec.deserialize({
+      sessionId: "kiro-session-1",
+      cwd: "/tmp/kiro",
+    });
+    expect(parsed).toEqual({
+      sessionId: "kiro-session-1",
+      cwd: "/tmp/kiro",
+    });
+
+    const serialized = kiroSessionCodec.serialize(parsed);
+    expect(serialized).toEqual({
+      sessionId: "kiro-session-1",
+      cwd: "/tmp/kiro",
+    });
+    expect(kiroSessionCodec.getDisplayId?.(serialized ?? null)).toBe("kiro-session-1");
   });
 });
 

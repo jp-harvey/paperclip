@@ -37,5 +37,5 @@ Notes:
 - The --no-interactive flag is always set for headless execution.
 - Session resume uses --resume-id <session_id>.
 - Kiro CLI does not currently support structured JSON output; stdout is parsed as plain text.
-- When not authenticated, Kiro CLI may launch an interactive login prompt that hangs in headless mode. The default 15-minute timeout prevents indefinite hangs. Run \`kiro-cli login\` or set KIRO_API_KEY before using this adapter.
+- When not authenticated, Kiro CLI may launch an interactive login prompt that hangs in headless mode. A pre-flight \`kiro-cli whoami\` check prevents this by failing fast with an actionable error. Run \`kiro-cli login\` or set KIRO_API_KEY before using this adapter.
 `;
