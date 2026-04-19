@@ -12,7 +12,7 @@ import {
   runChildProcess,
 } from "@paperclipai/adapter-utils/server-utils";
 import path from "node:path";
-import { isKiroAuthRequired } from "./parse.js";
+import { checkKiroAuth } from "./parse.js";
 // Note: Kiro CLI silently starts a fresh session when --resume-id is invalid
 // (exit code 0), so there is no unknown-session error detection needed.
 import { buildKiroExecArgs } from "./kiro-args.js";
@@ -27,14 +27,7 @@ function isNonEmpty(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function firstNonEmptyLine(text: string): string {
-  return (
-    text
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find(Boolean) ?? ""
-  );
-}
+import { firstNonEmptyLine } from "./utils.js";
 
 function commandLooksLike(command: string, expected: string): boolean {
   const base = path.basename(command).toLowerCase();
@@ -117,7 +110,7 @@ export async function testEnvironment(
     });
   }
 
-  // Run a hello probe if the command looks like kiro-cli
+  // Run auth and hello probes if the command is resolvable
   const canRunProbe =
     checks.every((check) => check.code !== "kiro_cwd_invalid" && check.code !== "kiro_command_unresolvable");
   if (canRunProbe) {
@@ -129,6 +122,37 @@ export async function testEnvironment(
         detail: command,
       });
     } else {
+      // Fast auth check via `kiro-cli whoami` — avoids the hang that occurs
+      // when an unauthenticated Kiro CLI launches an interactive login prompt.
+      const hasApiKey = isNonEmpty(configApiKey) || isNonEmpty(hostApiKey);
+      if (!hasApiKey) {
+        const authCheck = await checkKiroAuth(command, cwd, env, runChildProcess);
+        if (authCheck.authenticated) {
+          checks.push({
+            code: "kiro_auth_verified",
+            level: "info",
+            message: "Kiro CLI is authenticated via interactive login.",
+            detail: authCheck.detail,
+          });
+        } else {
+          checks.push({
+            code: "kiro_auth_missing",
+            level: "warn",
+            message: "Kiro CLI is not authenticated. Runs will fail until authentication is configured.",
+            detail: authCheck.detail,
+            hint: "Set KIRO_API_KEY in adapter env/shell or run `kiro-cli login`.",
+          });
+          // Skip the hello probe — it would hang on the login prompt.
+          return {
+            adapterType: ctx.adapterType,
+            status: summarizeStatus(checks),
+            checks,
+            testedAt: new Date().toISOString(),
+          };
+        }
+      }
+
+      // Hello probe — only runs if auth is confirmed
       const execArgs = buildKiroExecArgs(config);
       const args = [...execArgs.args, "Respond with hello."];
 
@@ -145,7 +169,6 @@ export async function testEnvironment(
         },
       );
       const detail = summarizeProbeDetail(probe.stdout, probe.stderr);
-      const authEvidence = `${probe.stdout}\n${probe.stderr}`.trim();
 
       if (probe.timedOut) {
         checks.push({
@@ -163,14 +186,6 @@ export async function testEnvironment(
             ? "Kiro CLI hello probe succeeded."
             : "Kiro CLI probe ran but did not return `hello` as expected.",
           ...(detail ? { detail } : {}),
-        });
-      } else if (isKiroAuthRequired(probe.stdout, probe.stderr)) {
-        checks.push({
-          code: "kiro_hello_probe_auth_required",
-          level: "warn",
-          message: "Kiro CLI is installed, but authentication is not ready.",
-          ...(detail ? { detail } : {}),
-          hint: "Set KIRO_API_KEY in adapter env/shell or run `kiro-cli login`, then retry the probe.",
         });
       } else {
         checks.push({

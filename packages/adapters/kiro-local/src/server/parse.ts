@@ -25,8 +25,8 @@ export function parseKiroStdout(stdout: string): {
     const line = rawLine.trim();
     if (!line) continue;
 
-    // Capture error-like lines
-    if (/^error:/i.test(line) || /^fatal:/i.test(line)) {
+    // Capture the first error-like line (root cause)
+    if (!errorMessage && (/^error:/i.test(line) || /^fatal:/i.test(line))) {
       errorMessage = line;
       continue;
     }
@@ -69,13 +69,7 @@ export function parseKiroCredits(stderr: string): {
   };
 }
 
-const KIRO_AUTH_REQUIRED_RE =
-  /(?:not\s+logged\s+in|login\s+required|authentication\s+required|unauthorized|invalid.*api[_\s-]?key|kiro[_\s-]?api[_\s-]?key.*required|please\s+run\s+`?kiro-cli\s+login`?)/i;
-
-export function isKiroAuthRequired(stdout: string, stderr: string): boolean {
-  const haystack = `${stdout}\n${stderr}`;
-  return KIRO_AUTH_REQUIRED_RE.test(haystack);
-}
+import { randomBytes } from "node:crypto";
 
 // ---------------------------------------------------------------------------
 // Session discovery via --list-sessions
@@ -85,11 +79,11 @@ const SESSION_LINE_RE = /Chat SessionId:\s*([0-9a-f-]{36})/i;
 
 /**
  * Generate a short session marker to prepend to the prompt.
- * Format: `pcsid:<6 hex chars><unix seconds>` — short enough to be
+ * Format: `pcsid:<6 hex chars><unix seconds base36>` — short enough to be
  * negligible in the context window, unique enough to match in --list-sessions.
  */
 export function generateSessionMarker(): string {
-  const hex = Math.random().toString(16).slice(2, 8);
+  const hex = randomBytes(3).toString("hex");
   const ts = Math.floor(Date.now() / 1000).toString(36);
   return `pcsid:${hex}${ts}`;
 }
@@ -148,5 +142,44 @@ export async function discoverSessionId(
     return matchSessionByMarker(proc.stdout, marker);
   } catch {
     return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Auth pre-flight via `kiro-cli whoami`
+// ---------------------------------------------------------------------------
+
+/**
+ * Run `kiro-cli whoami` to check if the CLI is authenticated.
+ * Returns true if authenticated, false if not or if the command fails.
+ * This is much faster and more reliable than waiting for the chat command
+ * to hang on an interactive login prompt.
+ */
+export async function checkKiroAuth(
+  command: string,
+  cwd: string,
+  env: Record<string, string>,
+  runChildProcessFn: typeof import("@paperclipai/adapter-utils/server-utils").runChildProcess,
+): Promise<{ authenticated: boolean; detail: string | null }> {
+  try {
+    const proc = await runChildProcessFn(
+      `kiro-auth-check-${Date.now()}`,
+      command,
+      ["whoami"],
+      {
+        cwd,
+        env,
+        timeoutSec: 10,
+        graceSec: 2,
+        onLog: async () => {},
+      },
+    );
+    const output = `${proc.stdout}\n${proc.stderr}`.trim();
+    if ((proc.exitCode ?? 1) === 0) {
+      return { authenticated: true, detail: proc.stdout.trim() || null };
+    }
+    return { authenticated: false, detail: output || "Not logged in" };
+  } catch {
+    return { authenticated: false, detail: "Failed to run kiro-cli whoami" };
   }
 }

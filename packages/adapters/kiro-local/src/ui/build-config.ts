@@ -70,7 +70,16 @@ export function buildKiroLocalConfig(v: CreateConfigValues): Record<string, unkn
   ac.model = v.model || "";
   ac.timeoutSec = 0;
   ac.graceSec = 15;
-  ac.trustAllTools = true;
+
+  const trustTools = typeof (v as unknown as Record<string, unknown>).trustTools === "string"
+    ? ((v as unknown as Record<string, unknown>).trustTools as string).trim()
+    : "";
+  if (trustTools) {
+    ac.trustTools = trustTools;
+    ac.trustAllTools = false;
+  } else {
+    ac.trustAllTools = true;
+  }
 
   const env = parseEnvBindings(v.envBindings);
   const legacy = parseEnvVars(v.envVars);

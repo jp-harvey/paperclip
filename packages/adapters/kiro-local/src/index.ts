@@ -23,8 +23,8 @@ Core fields:
 - workspaceStrategy (object, optional): execution workspace strategy
 
 Operational fields:
-- timeoutSec (number, optional): run timeout in seconds
-- graceSec (number, optional): SIGTERM grace period in seconds
+- timeoutSec (number, optional): run timeout in seconds (default: 0 — no timeout)
+- graceSec (number, optional): SIGTERM grace period in seconds (default: 15)
 
 Authentication:
 - Kiro CLI supports two authentication modes:
@@ -37,4 +37,5 @@ Notes:
 - The --no-interactive flag is always set for headless execution.
 - Session resume uses --resume-id <session_id>.
 - Kiro CLI does not currently support structured JSON output; stdout is parsed as plain text.
+- When not authenticated, Kiro CLI may launch an interactive login prompt that hangs in headless mode. The default 15-minute timeout prevents indefinite hangs. Run \`kiro-cli login\` or set KIRO_API_KEY before using this adapter.
 `;

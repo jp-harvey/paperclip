@@ -17,17 +17,10 @@ import {
   joinPromptSections,
   runChildProcess,
 } from "@paperclipai/adapter-utils/server-utils";
-import { parseKiroStdout, parseKiroCredits, discoverSessionId, generateSessionMarker } from "./parse.js";
+import { parseKiroStdout, parseKiroCredits, discoverSessionId, generateSessionMarker, checkKiroAuth } from "./parse.js";
 import { buildKiroExecArgs } from "./kiro-args.js";
 
-function firstNonEmptyLine(text: string): string {
-  return (
-    text
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find(Boolean) ?? ""
-  );
-}
+import { firstNonEmptyLine } from "./utils.js";
 
 function hasNonEmptyEnvValue(env: Record<string, string>, key: string): boolean {
   const raw = env[key];
@@ -135,8 +128,31 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     resolvedCommand,
   });
 
+  // Default to no timeout, consistent with other adapters. The auth hang
+  // risk is mitigated by the `kiro-cli whoami` pre-flight check above.
   const timeoutSec = asNumber(config.timeoutSec, 0);
-  const graceSec = asNumber(config.graceSec, 20);
+  const graceSec = asNumber(config.graceSec, 15);
+
+  // Pre-flight auth check: run `kiro-cli whoami` to verify authentication
+  // before launching the chat command. Without this, an unauthenticated
+  // Kiro CLI will launch an interactive login prompt that hangs indefinitely
+  // in headless mode (--no-interactive is ignored for the login flow).
+  if (!hasNonEmptyEnvValue(effectiveEnv, "KIRO_API_KEY")) {
+    const authCheck = await checkKiroAuth(command, cwd, env, runChildProcess);
+    if (!authCheck.authenticated) {
+      await onLog(
+        "stdout",
+        `[paperclip] Kiro CLI is not authenticated: ${authCheck.detail ?? "Not logged in"}. Run \`kiro-cli login\` or set KIRO_API_KEY.\n`,
+      );
+      return {
+        exitCode: 1,
+        signal: null,
+        timedOut: false,
+        errorMessage: "Kiro CLI is not authenticated. Run `kiro-cli login` or set KIRO_API_KEY in adapter env.",
+        errorCode: "auth_required",
+      };
+    }
+  }
 
   // Kiro CLI does not expose session IDs in stdout/stderr — they are stored
   // internally and only visible via `kiro-cli chat --list-sessions`. We still

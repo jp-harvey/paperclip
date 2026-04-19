@@ -58,12 +58,12 @@ export function KiroLocalConfigFields({
         <DraftInput
           value={
             isCreate
-              ? values!.extraArgs ?? ""
+              ? values!.trustTools ?? ""
               : eff("adapterConfig", "trustTools", String(config.trustTools ?? ""))
           }
           onCommit={(v) =>
             isCreate
-              ? set!({ extraArgs: v })
+              ? set!({ trustTools: v })
               : mark("adapterConfig", "trustTools", v || undefined)
           }
           immediate

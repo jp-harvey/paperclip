@@ -94,4 +94,35 @@ describe("buildKiroLocalConfig", () => {
       branchTemplate: "kiro/{{issue.key}}",
     });
   });
+
+  it("sets trustTools and disables trustAllTools when trustTools is provided", () => {
+    const config = buildKiroLocalConfig(
+      makeValues({
+        trustTools: "fs_read,fs_write,grep",
+      } as any),
+    );
+
+    expect(config.trustTools).toBe("fs_read,fs_write,grep");
+    expect(config.trustAllTools).toBe(false);
+  });
+
+  it("parses extraArgs as comma-separated values", () => {
+    const config = buildKiroLocalConfig(
+      makeValues({
+        extraArgs: "--verbose, --require-mcp-startup",
+      }),
+    );
+
+    expect(config.extraArgs).toEqual(["--verbose", "--require-mcp-startup"]);
+  });
+
+  it("passes through custom command", () => {
+    const config = buildKiroLocalConfig(
+      makeValues({
+        command: "/usr/local/bin/kiro-cli",
+      }),
+    );
+
+    expect(config.command).toBe("/usr/local/bin/kiro-cli");
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseKiroStdout, parseKiroCredits, isKiroAuthRequired, generateSessionMarker, matchSessionByMarker } from "./parse.js";
+import { parseKiroStdout, parseKiroCredits, generateSessionMarker, matchSessionByMarker, discoverSessionId } from "./parse.js";
 
 describe("parseKiroStdout", () => {
   it("strips the > prefix from assistant response lines", () => {
@@ -40,20 +40,6 @@ describe("parseKiroStdout", () => {
     const stdout = "Hello";
     const result = parseKiroStdout(stdout);
     expect(result.summary).toBe("Hello");
-  });
-});
-
-describe("isKiroAuthRequired", () => {
-  it("detects login required messages", () => {
-    expect(isKiroAuthRequired("", "not logged in")).toBe(true);
-    expect(isKiroAuthRequired("please run kiro-cli login", "")).toBe(true);
-    expect(isKiroAuthRequired("", "authentication required")).toBe(true);
-    expect(isKiroAuthRequired("invalid api key", "")).toBe(true);
-  });
-
-  it("does not flag unrelated errors", () => {
-    expect(isKiroAuthRequired("model overloaded", "")).toBe(false);
-    expect(isKiroAuthRequired("", "timeout")).toBe(false);
   });
 });
 
@@ -135,5 +121,49 @@ Chat SessionId: 87117d77-e6b4-47a5-a483-2a90edee8b95
 
   it("returns null for empty output", () => {
     expect(matchSessionByMarker("", "pcsid:abc123")).toBeNull();
+  });
+});
+
+describe("discoverSessionId", () => {
+  it("returns null when the command fails", async () => {
+    const mockRun = async () => ({
+      exitCode: 1,
+      signal: null,
+      timedOut: false,
+      stdout: "",
+      stderr: "error",
+    });
+    const result = await discoverSessionId("kiro-cli", "/tmp", {}, "pcsid:abc123", mockRun as any);
+    expect(result).toBeNull();
+  });
+
+  it("returns null when the marker is not found in output", async () => {
+    const mockRun = async () => ({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      stdout: "Chat SessionId: aaaa-bbbb\n  0 seconds ago | unrelated prompt | 2 msgs | v1",
+      stderr: "",
+    });
+    const result = await discoverSessionId("kiro-cli", "/tmp", {}, "pcsid:xyz789", mockRun as any);
+    expect(result).toBeNull();
+  });
+
+  it("returns null when the command throws", async () => {
+    const mockRun = async () => { throw new Error("spawn failed"); };
+    const result = await discoverSessionId("kiro-cli", "/tmp", {}, "pcsid:abc123", mockRun as any);
+    expect(result).toBeNull();
+  });
+
+  it("returns the session ID when the marker matches", async () => {
+    const mockRun = async () => ({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      stdout: "Chat SessionId: 12345678-1234-1234-1234-123456789abc\n  0 seconds ago | [pcsid:abc123] prompt | 2 msgs | v1",
+      stderr: "",
+    });
+    const result = await discoverSessionId("kiro-cli", "/tmp", {}, "pcsid:abc123", mockRun as any);
+    expect(result).toBe("12345678-1234-1234-1234-123456789abc");
   });
 });
