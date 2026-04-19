@@ -71,7 +71,6 @@ import {
 import {
   execute as kiroExecute,
   testEnvironment as kiroTestEnvironment,
-  sessionCodec as kiroSessionCodec,
 } from "@paperclipai/adapter-kiro-local/server";
 import { agentConfigurationDoc as kiroAgentConfigurationDoc, models as kiroModels } from "@paperclipai/adapter-kiro-local";
 import {
@@ -210,7 +209,6 @@ const kiroLocalAdapter: ServerAdapterModule = {
   type: "kiro_local",
   execute: kiroExecute,
   testEnvironment: kiroTestEnvironment,
-  sessionCodec: kiroSessionCodec,
   sessionManagement: getAdapterSessionManagement("kiro_local") ?? undefined,
   models: kiroModels,
   supportsLocalAgentJwt: false,

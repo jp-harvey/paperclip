@@ -1,16 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseKiroStdout, isKiroAuthRequired, isKiroUnknownSessionError } from "./parse.js";
+import { parseKiroStdout, parseKiroCredits, isKiroAuthRequired } from "./parse.js";
 
 describe("parseKiroStdout", () => {
-  it("extracts a session id from output", () => {
-    const stdout = [
-      "session: a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-      "Hello! How can I help you today?",
-    ].join("\n");
-
+  it("strips the > prefix from assistant response lines", () => {
+    const stdout = "> Hello! How can I help you today?";
     const result = parseKiroStdout(stdout);
-    expect(result.sessionId).toBe("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
-    expect(result.summary).toContain("Hello");
+    expect(result.summary).toBe("Hello! How can I help you today?");
     expect(result.errorMessage).toBeNull();
   });
 
@@ -24,23 +19,27 @@ describe("parseKiroStdout", () => {
     expect(result.errorMessage).toBe("error: authentication required");
   });
 
-  it("returns the last lines as summary when no session id is found", () => {
+  it("handles multi-line responses", () => {
     const stdout = [
-      "I've reviewed the code and made the changes.",
-      "All tests pass.",
+      "> I've reviewed the code and made the changes.",
+      "> All tests pass.",
     ].join("\n");
 
     const result = parseKiroStdout(stdout);
-    expect(result.sessionId).toBeNull();
-    expect(result.summary).toContain("All tests pass.");
+    expect(result.summary).toBe("I've reviewed the code and made the changes.\nAll tests pass.");
     expect(result.errorMessage).toBeNull();
   });
 
   it("handles empty output", () => {
     const result = parseKiroStdout("");
-    expect(result.sessionId).toBeNull();
     expect(result.summary).toBe("");
     expect(result.errorMessage).toBeNull();
+  });
+
+  it("handles response without > prefix", () => {
+    const stdout = "Hello";
+    const result = parseKiroStdout(stdout);
+    expect(result.summary).toBe("Hello");
   });
 });
 
@@ -58,15 +57,38 @@ describe("isKiroAuthRequired", () => {
   });
 });
 
-describe("isKiroUnknownSessionError", () => {
-  it("detects unknown session errors", () => {
-    expect(isKiroUnknownSessionError("unknown session", "")).toBe(true);
-    expect(isKiroUnknownSessionError("", "session abc-123 not found")).toBe(true);
-    expect(isKiroUnknownSessionError("", "conversation xyz not found")).toBe(true);
+describe("parseKiroCredits", () => {
+  it("extracts credits and time from the stderr summary line", () => {
+    const stderr = [
+      "All tools are now trusted (!). Kiro will execute tools without asking for confirmation.",
+      "",
+      " ▸ Credits: 0.04 • Time: 2s",
+      "",
+    ].join("\n");
+
+    const result = parseKiroCredits(stderr);
+    expect(result.credits).toBe(0.04);
+    expect(result.timeSec).toBe(2);
   });
 
-  it("does not classify unrelated failures as session errors", () => {
-    expect(isKiroUnknownSessionError("", "model overloaded")).toBe(false);
-    expect(isKiroUnknownSessionError("timeout", "")).toBe(false);
+  it("handles larger credit values", () => {
+    const stderr = " ▸ Credits: 12.50 • Time: 45s";
+    const result = parseKiroCredits(stderr);
+    expect(result.credits).toBe(12.5);
+    expect(result.timeSec).toBe(45);
+  });
+
+  it("returns null when no credits line is present", () => {
+    const stderr = "some random error output";
+    const result = parseKiroCredits(stderr);
+    expect(result.credits).toBeNull();
+    expect(result.timeSec).toBeNull();
+  });
+
+  it("handles credits without time", () => {
+    const stderr = " ▸ Credits: 0.07";
+    const result = parseKiroCredits(stderr);
+    expect(result.credits).toBe(0.07);
+    expect(result.timeSec).toBeNull();
   });
 });

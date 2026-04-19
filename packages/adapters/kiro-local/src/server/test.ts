@@ -13,6 +13,8 @@ import {
 } from "@paperclipai/adapter-utils/server-utils";
 import path from "node:path";
 import { isKiroAuthRequired } from "./parse.js";
+// Note: Kiro CLI silently starts a fresh session when --resume-id is invalid
+// (exit code 0), so there is no unknown-session error detection needed.
 import { buildKiroExecArgs } from "./kiro-args.js";
 
 function summarizeStatus(checks: AdapterEnvironmentCheck[]): AdapterEnvironmentTestResult["status"] {

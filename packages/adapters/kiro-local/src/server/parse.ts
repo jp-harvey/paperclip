@@ -1,19 +1,23 @@
 /**
- * Parse Kiro CLI plain-text stdout output.
+ * Parse Kiro CLI plain-text stdout/stderr output.
  *
- * Kiro CLI v2 does not support structured JSON output, so we extract what we
- * can from the human-readable text: session IDs, error messages, and the final
- * assistant summary.
+ * Kiro CLI v2 does not emit structured JSON output or session IDs in
+ * stdout/stderr. The session is stored internally and accessible only
+ * via `kiro-cli chat --list-sessions`. Stdout contains the assistant
+ * response prefixed with `> `. Stderr contains the trust banner and
+ * a credits/time summary line like: ` ▸ Credits: 0.04 • Time: 2s`
  */
 
-const SESSION_ID_RE = /\bsession[:\s]+([0-9a-f-]{36})\b/i;
+const RESPONSE_PREFIX_RE = /^>\s?/;
+
+/** Matches ` ▸ Credits: 0.04 • Time: 2s` on stderr */
+const CREDITS_RE = /Credits:\s*([\d.]+)/;
+const TIME_RE = /Time:\s*(\d+)s/;
 
 export function parseKiroStdout(stdout: string): {
-  sessionId: string | null;
   summary: string;
   errorMessage: string | null;
 } {
-  let sessionId: string | null = null;
   let errorMessage: string | null = null;
   const lines: string[] = [];
 
@@ -21,28 +25,48 @@ export function parseKiroStdout(stdout: string): {
     const line = rawLine.trim();
     if (!line) continue;
 
-    // Try to extract a session id from early output
-    if (!sessionId) {
-      const match = line.match(SESSION_ID_RE);
-      if (match) {
-        sessionId = match[1]!;
-        continue;
-      }
-    }
-
     // Capture error-like lines
     if (/^error:/i.test(line) || /^fatal:/i.test(line)) {
       errorMessage = line;
       continue;
     }
 
-    lines.push(line);
+    // Strip the `> ` response prefix that kiro-cli adds to assistant output
+    const cleaned = line.replace(RESPONSE_PREFIX_RE, "");
+    if (cleaned) lines.push(cleaned);
   }
 
-  // Use the last non-empty lines as the summary (the assistant's final response)
-  const summary = lines.slice(-20).join("\n").trim();
+  const summary = lines.join("\n").trim();
 
-  return { sessionId, summary, errorMessage };
+  return { summary, errorMessage };
+}
+
+/**
+ * Parse the credits and wall-clock time from Kiro CLI stderr.
+ *
+ * Kiro CLI prints a summary line on stderr like:
+ *   ` ▸ Credits: 0.04 • Time: 2s`
+ *
+ * Returns null values when the line is not found.
+ */
+export function parseKiroCredits(stderr: string): {
+  credits: number | null;
+  timeSec: number | null;
+} {
+  const creditsMatch = stderr.match(CREDITS_RE);
+  const timeMatch = stderr.match(TIME_RE);
+
+  const credits = creditsMatch
+    ? parseFloat(creditsMatch[1]!)
+    : null;
+  const timeSec = timeMatch
+    ? parseInt(timeMatch[1]!, 10)
+    : null;
+
+  return {
+    credits: credits !== null && Number.isFinite(credits) ? credits : null,
+    timeSec: timeSec !== null && Number.isFinite(timeSec) ? timeSec : null,
+  };
 }
 
 const KIRO_AUTH_REQUIRED_RE =
@@ -51,9 +75,4 @@ const KIRO_AUTH_REQUIRED_RE =
 export function isKiroAuthRequired(stdout: string, stderr: string): boolean {
   const haystack = `${stdout}\n${stderr}`;
   return KIRO_AUTH_REQUIRED_RE.test(haystack);
-}
-
-export function isKiroUnknownSessionError(stdout: string, stderr: string): boolean {
-  const haystack = `${stdout}\n${stderr}`;
-  return /unknown session|session .* not found|conversation .* not found/i.test(haystack);
 }

@@ -1,6 +1,5 @@
 import path from "node:path";
 import fs from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import type { AdapterExecutionContext, AdapterExecutionResult } from "@paperclipai/adapter-utils";
 import {
   asString,
@@ -18,10 +17,8 @@ import {
   joinPromptSections,
   runChildProcess,
 } from "@paperclipai/adapter-utils/server-utils";
-import { parseKiroStdout, isKiroUnknownSessionError } from "./parse.js";
+import { parseKiroStdout, parseKiroCredits } from "./parse.js";
 import { buildKiroExecArgs } from "./kiro-args.js";
-
-const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
 function firstNonEmptyLine(text: string): string {
   return (
@@ -141,6 +138,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const timeoutSec = asNumber(config.timeoutSec, 0);
   const graceSec = asNumber(config.graceSec, 20);
 
+  // Kiro CLI does not expose session IDs in stdout/stderr — they are stored
+  // internally and only visible via `kiro-cli chat --list-sessions`. We still
+  // pass --resume-id when a previous session is available so Kiro can resume
+  // context, but we cannot extract a new session ID from the output.
+  // Invalid resume IDs are silently ignored (Kiro starts a fresh session).
   const runtimeSessionParams = parseObject(runtime.sessionParams);
   const runtimeSessionId = asString(runtimeSessionParams.sessionId, runtime.sessionId ?? "");
   const runtimeSessionCwd = asString(runtimeSessionParams.cwd, "");
@@ -207,110 +209,75 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     heartbeatPromptChars: renderedPrompt.length,
   };
 
-  const runAttempt = async (resumeSessionId: string | null) => {
-    const execArgs = buildKiroExecArgs(config, { resumeSessionId });
-    const args = [...execArgs.args, prompt];
+  const execArgs = buildKiroExecArgs(config, { resumeSessionId: sessionId });
+  const args = [...execArgs.args, prompt];
 
-    if (onMeta) {
-      await onMeta({
-        adapterType: "kiro_local",
-        command: resolvedCommand,
-        cwd,
-        commandArgs: args.map((value, idx) => {
-          if (idx === args.length - 1) return `<prompt ${prompt.length} chars>`;
-          return value;
-        }),
-        env: loggedEnv,
-        prompt,
-        promptMetrics,
-        context,
-      });
-    }
-
-    const proc = await runChildProcess(runId, command, args, {
+  if (onMeta) {
+    await onMeta({
+      adapterType: "kiro_local",
+      command: resolvedCommand,
       cwd,
-      env,
-      timeoutSec,
-      graceSec,
-      onSpawn,
-      onLog,
+      commandArgs: args.map((value, idx) => {
+        if (idx === args.length - 1) return `<prompt ${prompt.length} chars>`;
+        return value;
+      }),
+      env: loggedEnv,
+      prompt,
+      promptMetrics,
+      context,
     });
-
-    return {
-      proc,
-      parsed: parseKiroStdout(proc.stdout),
-    };
-  };
-
-  const toResult = (
-    attempt: {
-      proc: { exitCode: number | null; signal: string | null; timedOut: boolean; stdout: string; stderr: string };
-      parsed: ReturnType<typeof parseKiroStdout>;
-    },
-    clearSessionOnMissingSession = false,
-  ): AdapterExecutionResult => {
-    if (attempt.proc.timedOut) {
-      return {
-        exitCode: attempt.proc.exitCode,
-        signal: attempt.proc.signal,
-        timedOut: true,
-        errorMessage: `Timed out after ${timeoutSec}s`,
-        clearSession: clearSessionOnMissingSession,
-      };
-    }
-
-    const resolvedSessionId = attempt.parsed.sessionId ?? runtimeSessionId ?? runtime.sessionId ?? null;
-    const resolvedSessionParams = resolvedSessionId
-      ? ({
-          sessionId: resolvedSessionId,
-          cwd,
-          ...(workspaceId ? { workspaceId } : {}),
-          ...(workspaceRepoUrl ? { repoUrl: workspaceRepoUrl } : {}),
-          ...(workspaceRepoRef ? { repoRef: workspaceRepoRef } : {}),
-        } as Record<string, unknown>)
-      : null;
-    const stderrLine = firstNonEmptyLine(attempt.proc.stderr);
-    const fallbackErrorMessage =
-      attempt.parsed.errorMessage ||
-      stderrLine ||
-      `Kiro CLI exited with code ${attempt.proc.exitCode ?? -1}`;
-
-    return {
-      exitCode: attempt.proc.exitCode,
-      signal: attempt.proc.signal,
-      timedOut: false,
-      errorMessage: (attempt.proc.exitCode ?? 0) === 0 ? null : fallbackErrorMessage,
-      sessionId: resolvedSessionId,
-      sessionParams: resolvedSessionParams,
-      sessionDisplayId: resolvedSessionId,
-      provider: "kiro",
-      biller: billingType === "api" ? "kiro" : "kiro",
-      model: asString(config.model, ""),
-      billingType,
-      costUsd: null,
-      resultJson: {
-        stdout: attempt.proc.stdout,
-        stderr: attempt.proc.stderr,
-      },
-      summary: attempt.parsed.summary,
-      clearSession: Boolean(clearSessionOnMissingSession && !resolvedSessionId),
-    };
-  };
-
-  const initial = await runAttempt(sessionId);
-  if (
-    sessionId &&
-    !initial.proc.timedOut &&
-    (initial.proc.exitCode ?? 0) !== 0 &&
-    isKiroUnknownSessionError(initial.proc.stdout, initial.proc.stderr)
-  ) {
-    await onLog(
-      "stdout",
-      `[paperclip] Kiro resume session "${sessionId}" is unavailable; retrying with a fresh session.\n`,
-    );
-    const retry = await runAttempt(null);
-    return toResult(retry, true);
   }
 
-  return toResult(initial);
+  const proc = await runChildProcess(runId, command, args, {
+    cwd,
+    env,
+    timeoutSec,
+    graceSec,
+    onSpawn,
+    onLog,
+  });
+
+  const parsed = parseKiroStdout(proc.stdout);
+  const credits = parseKiroCredits(proc.stderr);
+
+  if (proc.timedOut) {
+    return {
+      exitCode: proc.exitCode,
+      signal: proc.signal,
+      timedOut: true,
+      errorMessage: `Timed out after ${timeoutSec}s`,
+    };
+  }
+
+  const stderrLine = firstNonEmptyLine(proc.stderr);
+  const fallbackErrorMessage =
+    parsed.errorMessage ||
+    stderrLine ||
+    `Kiro CLI exited with code ${proc.exitCode ?? -1}`;
+
+  return {
+    exitCode: proc.exitCode,
+    signal: proc.signal,
+    timedOut: false,
+    errorMessage: (proc.exitCode ?? 0) === 0 ? null : fallbackErrorMessage,
+    // Kiro CLI does not expose session IDs in output; pass through the
+    // runtime session so Paperclip can attempt --resume-id on the next run.
+    sessionId: runtimeSessionId || null,
+    sessionParams: runtimeSessionId
+      ? { sessionId: runtimeSessionId, cwd } as Record<string, unknown>
+      : null,
+    sessionDisplayId: runtimeSessionId || null,
+    provider: "kiro",
+    biller: "kiro",
+    model: asString(config.model, ""),
+    billingType,
+    costUsd: credits.credits,
+    resultJson: {
+      stdout: proc.stdout,
+      stderr: proc.stderr,
+      ...(credits.credits !== null ? { credits: credits.credits } : {}),
+      ...(credits.timeSec !== null ? { timeSec: credits.timeSec } : {}),
+    },
+    summary: parsed.summary,
+  };
 }
