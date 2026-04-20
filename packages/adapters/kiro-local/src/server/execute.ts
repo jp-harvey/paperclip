@@ -264,6 +264,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const parsed = parseKiroStdout(proc.stdout);
   const credits = parseKiroCredits(proc.stderr);
 
+  // Convert Kiro credits to USD. Default rate is $0.04 per credit.
+  // Configurable via adapter config `creditRateUsd` for different plans.
+  const creditRateUsd = asNumber(config.creditRateUsd, 0.04);
+  const costUsd = credits.credits !== null ? credits.credits * creditRateUsd : null;
+
   // Discover the session ID for fresh sessions by matching our marker
   // in the --list-sessions output. Skip for resumed sessions (we already
   // have the ID) and failed/timed-out runs.
@@ -321,11 +326,12 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     biller: "kiro",
     model: asString(config.model, ""),
     billingType,
-    costUsd: credits.credits,
+    costUsd,
     resultJson: {
       stdout: proc.stdout,
       stderr: proc.stderr,
       ...(credits.credits !== null ? { credits: credits.credits } : {}),
+      ...(costUsd !== null ? { costUsd } : {}),
       ...(credits.timeSec !== null ? { timeSec: credits.timeSec } : {}),
     },
     summary: parsed.summary,

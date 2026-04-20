@@ -64,6 +64,20 @@ describe("parseKiroCredits", () => {
     expect(result.timeSec).toBe(45);
   });
 
+  it("handles minutes and seconds format", () => {
+    const stderr = " ▸ Credits: 11.70 • Time: 4m 10s";
+    const result = parseKiroCredits(stderr);
+    expect(result.credits).toBe(11.7);
+    expect(result.timeSec).toBe(250);
+  });
+
+  it("handles hours, minutes and seconds format", () => {
+    const stderr = " ▸ Credits: 85.00 • Time: 1h 23m 45s";
+    const result = parseKiroCredits(stderr);
+    expect(result.credits).toBe(85);
+    expect(result.timeSec).toBe(5025);
+  });
+
   it("returns null when no credits line is present", () => {
     const stderr = "some random error output";
     const result = parseKiroCredits(stderr);
@@ -76,6 +90,13 @@ describe("parseKiroCredits", () => {
     const result = parseKiroCredits(stderr);
     expect(result.credits).toBe(0.07);
     expect(result.timeSec).toBeNull();
+  });
+
+  it("strips ANSI codes before parsing", () => {
+    const stderr = "\x1b[38;5;8m  ▸ Credits: 11.70 • Time: 4m 10s  \x1b[0m";
+    const result = parseKiroCredits(stderr);
+    expect(result.credits).toBe(11.7);
+    expect(result.timeSec).toBe(250);
   });
 });
 

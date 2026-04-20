@@ -9,10 +9,11 @@
  */
 
 const RESPONSE_PREFIX_RE = /^>\s?/;
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
-/** Matches ` ▸ Credits: 0.04 • Time: 2s` on stderr */
+/** Matches ` ▸ Credits: 0.04 • Time: 2s` or ` ▸ Credits: 11.70 • Time: 4m 10s` on stderr */
 const CREDITS_RE = /Credits:\s*([\d.]+)/;
-const TIME_RE = /Time:\s*(\d+)s/;
+const TIME_RE = /Time:\s*(?:(\d+)h\s*)?(?:(\d+)m\s*)?(\d+)s/;
 
 export function parseKiroStdout(stdout: string): {
   summary: string;
@@ -22,7 +23,8 @@ export function parseKiroStdout(stdout: string): {
   const lines: string[] = [];
 
   for (const rawLine of stdout.split(/\r?\n/)) {
-    const line = rawLine.trim();
+    // Strip ANSI escape codes — Kiro CLI emits color codes even in --no-interactive mode
+    const line = rawLine.replace(ANSI_RE, "").trim();
     if (!line) continue;
 
     // Capture the first error-like line (root cause)
@@ -53,14 +55,17 @@ export function parseKiroCredits(stderr: string): {
   credits: number | null;
   timeSec: number | null;
 } {
-  const creditsMatch = stderr.match(CREDITS_RE);
-  const timeMatch = stderr.match(TIME_RE);
+  // Strip ANSI escape codes before matching — Kiro CLI wraps the credits
+  // line in color codes even in non-interactive mode.
+  const clean = stderr.replace(ANSI_RE, "");
+  const creditsMatch = clean.match(CREDITS_RE);
+  const timeMatch = clean.match(TIME_RE);
 
   const credits = creditsMatch
     ? parseFloat(creditsMatch[1]!)
     : null;
   const timeSec = timeMatch
-    ? parseInt(timeMatch[1]!, 10)
+    ? (parseInt(timeMatch[1] ?? "0", 10) * 3600) + (parseInt(timeMatch[2] ?? "0", 10) * 60) + parseInt(timeMatch[3]!, 10)
     : null;
 
   return {
@@ -139,7 +144,9 @@ export async function discoverSessionId(
       },
     );
     if ((proc.exitCode ?? 1) !== 0) return null;
-    return matchSessionByMarker(proc.stdout, marker);
+    // Kiro CLI outputs --list-sessions to stderr, not stdout
+    const output = proc.stderr || proc.stdout;
+    return matchSessionByMarker(output, marker);
   } catch {
     return null;
   }

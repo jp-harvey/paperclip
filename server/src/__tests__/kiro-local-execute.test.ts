@@ -123,8 +123,8 @@ describe("kiro execute", () => {
       expect(result.provider).toBe("kiro");
       // Summary should have the > prefix stripped
       expect(result.summary).toBe("I've completed the task successfully.");
-      // Credits parsed from stderr
-      expect(result.costUsd).toBe(0.04);
+      // Credits parsed from stderr, converted to USD (0.04 credits × $0.04/credit)
+      expect(result.costUsd).toBeCloseTo(0.0016, 4);
       // Session discovered from --list-sessions
       expect(result.sessionId).toBe("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
 

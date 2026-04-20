@@ -33,6 +33,7 @@ Core fields:
 Operational fields:
 - timeoutSec (number, optional): run timeout in seconds (default: 0 — no timeout)
 - graceSec (number, optional): SIGTERM grace period in seconds (default: 15)
+- creditRateUsd (number, optional): USD cost per Kiro credit for cost tracking (default: 0.04)
 
 Authentication:
 - Kiro CLI supports two authentication modes:
