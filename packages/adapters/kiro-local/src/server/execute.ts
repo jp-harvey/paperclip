@@ -28,8 +28,13 @@ function hasNonEmptyEnvValue(env: Record<string, string>, key: string): boolean 
   return typeof raw === "string" && raw.trim().length > 0;
 }
 
-function resolveKiroBillingType(env: Record<string, string>): "api" | "subscription" {
-  return hasNonEmptyEnvValue(env, "KIRO_API_KEY") ? "api" : "subscription";
+function resolveKiroBillingType(env: Record<string, string>): "api" | "credits" {
+  // Kiro uses a credits-based billing model regardless of auth method.
+  // With KIRO_API_KEY → "api" (metered API usage).
+  // With interactive login → "credits" (subscription credits consumed per run).
+  // Important: "subscription" maps to "subscription_included" in the ledger,
+  // which zeroes out costUsd — wrong for Kiro where credits have real cost.
+  return hasNonEmptyEnvValue(env, "KIRO_API_KEY") ? "api" : "credits";
 }
 
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {

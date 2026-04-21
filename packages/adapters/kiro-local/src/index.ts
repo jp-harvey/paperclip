@@ -38,7 +38,7 @@ Operational fields:
 Authentication:
 - Kiro CLI supports two authentication modes:
   1. API key: set KIRO_API_KEY in adapter env or server environment for headless/CI usage
-  2. Interactive login: run \`kiro-cli login\` on the host for subscription-based auth
+  2. Interactive login: run \`kiro-cli login\` on the host for credits-based auth
 - Both modes work with the --no-interactive flag used by Paperclip
 
 Notes:
