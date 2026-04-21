@@ -101,7 +101,11 @@ export function matchSessionByMarker(
   listOutput: string,
   marker: string,
 ): string | null {
-  const lines = listOutput.split(/\r?\n/);
+  // Strip ANSI escape codes from the entire output before matching —
+  // Kiro CLI wraps --list-sessions output in color codes which would
+  // prevent the plain-text marker from being found.
+  const clean = listOutput.replace(ANSI_RE, "");
+  const lines = clean.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
     const idMatch = line.match(SESSION_LINE_RE);
@@ -110,9 +114,11 @@ export function matchSessionByMarker(
     // context for our marker. list-sessions format:
     //   Chat SessionId: <uuid>
     //     <time ago> | <prompt preview> | <N msgs> | <version>
-    const nextLine = lines[i + 1] ?? "";
-    if (nextLine.includes(marker)) {
-      return idMatch[1]!;
+    // Check a few lines ahead in case of wrapping or extra whitespace.
+    for (let j = i + 1; j <= i + 3 && j < lines.length; j++) {
+      if (lines[j]!.includes(marker)) {
+        return idMatch[1]!;
+      }
     }
   }
   return null;
@@ -129,6 +135,7 @@ export async function discoverSessionId(
   env: Record<string, string>,
   marker: string,
   runChildProcessFn: typeof import("@paperclipai/adapter-utils/server-utils").runChildProcess,
+  onLog?: (stream: "stdout" | "stderr", chunk: string) => Promise<void>,
 ): Promise<string | null> {
   try {
     const proc = await runChildProcessFn(
@@ -143,10 +150,23 @@ export async function discoverSessionId(
         onLog: async () => {},
       },
     );
-    if ((proc.exitCode ?? 1) !== 0) return null;
+    if ((proc.exitCode ?? 1) !== 0) {
+      if (onLog) {
+        await onLog("stdout", `[paperclip] Session discovery: --list-sessions exited ${proc.exitCode}\n`);
+      }
+      return null;
+    }
     // Kiro CLI outputs --list-sessions to stderr, not stdout
     const output = proc.stderr || proc.stdout;
-    return matchSessionByMarker(output, marker);
+    const result = matchSessionByMarker(output, marker);
+    if (!result && onLog) {
+      // Log a hint so operators can diagnose session discovery failures.
+      // Strip ANSI and truncate to avoid flooding logs.
+      const clean = output.replace(ANSI_RE, "").trim();
+      const preview = clean.length > 200 ? `${clean.slice(0, 200)}…` : clean;
+      await onLog("stdout", `[paperclip] Session discovery: marker "${marker}" not found in --list-sessions output (${clean.length} chars): ${preview}\n`);
+    }
+    return result;
   } catch {
     return null;
   }

@@ -299,6 +299,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       env,
       sessionMarker,
       runChildProcess,
+      onLog,
     );
     if (discoveredSessionId) {
       await onLog(

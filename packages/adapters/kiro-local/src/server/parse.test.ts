@@ -143,6 +143,27 @@ Chat SessionId: 87117d77-e6b4-47a5-a483-2a90edee8b95
   it("returns null for empty output", () => {
     expect(matchSessionByMarker("", "pcsid:abc123")).toBeNull();
   });
+
+  it("strips ANSI escape codes before matching", () => {
+    const output = [
+      "\x1b[38;5;8mChat sessions for /Users/user/project:\x1b[0m",
+      "",
+      "\x1b[1mChat SessionId: 87117d77-e6b4-47a5-a483-2a90edee8b95\x1b[0m",
+      "  0 seconds ago | \x1b[38;5;141m[pcsid:abc123lz5]\x1b[0m You are agent... | 2 msgs | v1",
+    ].join("\n");
+    const result = matchSessionByMarker(output, "pcsid:abc123lz5");
+    expect(result).toBe("87117d77-e6b4-47a5-a483-2a90edee8b95");
+  });
+
+  it("checks multiple lines after the session ID line", () => {
+    const output = [
+      "Chat SessionId: 87117d77-e6b4-47a5-a483-2a90edee8b95",
+      "  some metadata line",
+      "  0 seconds ago | [pcsid:abc123lz5] prompt | 2 msgs | v1",
+    ].join("\n");
+    const result = matchSessionByMarker(output, "pcsid:abc123lz5");
+    expect(result).toBe("87117d77-e6b4-47a5-a483-2a90edee8b95");
+  });
 });
 
 describe("discoverSessionId", () => {
@@ -183,6 +204,30 @@ describe("discoverSessionId", () => {
       timedOut: false,
       stdout: "Chat SessionId: 12345678-1234-1234-1234-123456789abc\n  0 seconds ago | [pcsid:abc123] prompt | 2 msgs | v1",
       stderr: "",
+    });
+    const result = await discoverSessionId("kiro-cli", "/tmp", {}, "pcsid:abc123", mockRun as any);
+    expect(result).toBe("12345678-1234-1234-1234-123456789abc");
+  });
+
+  it("finds the session from stderr (where --list-sessions outputs)", async () => {
+    const mockRun = async () => ({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      stdout: "",
+      stderr: "Chat SessionId: 12345678-1234-1234-1234-123456789abc\n  0 seconds ago | [pcsid:abc123] prompt | 2 msgs | v1",
+    });
+    const result = await discoverSessionId("kiro-cli", "/tmp", {}, "pcsid:abc123", mockRun as any);
+    expect(result).toBe("12345678-1234-1234-1234-123456789abc");
+  });
+
+  it("finds the session from ANSI-wrapped stderr output", async () => {
+    const mockRun = async () => ({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      stdout: "",
+      stderr: "\x1b[1mChat SessionId: 12345678-1234-1234-1234-123456789abc\x1b[0m\n  0 seconds ago | \x1b[38;5;141m[pcsid:abc123]\x1b[0m prompt | 2 msgs | v1",
     });
     const result = await discoverSessionId("kiro-cli", "/tmp", {}, "pcsid:abc123", mockRun as any);
     expect(result).toBe("12345678-1234-1234-1234-123456789abc");
