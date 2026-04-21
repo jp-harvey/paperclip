@@ -252,13 +252,23 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     });
   }
 
+  // Strip ANSI escape codes from log chunks — Kiro CLI emits colors and
+  // cursor controls even in --no-interactive mode.
+  const ANSI_LOG_RE = /\x1b\[[?]?[0-9;]*[A-Za-z]|\x1b\].*?\x07/g;
+  const cleanLog: typeof onLog = async (stream, chunk) => {
+    const cleaned = chunk.replace(ANSI_LOG_RE, "");
+    if (cleaned.trim()) {
+      await onLog(stream, cleaned);
+    }
+  };
+
   const proc = await runChildProcess(runId, command, args, {
     cwd,
     env,
     timeoutSec,
     graceSec,
     onSpawn,
-    onLog,
+    onLog: cleanLog,
   });
 
   const parsed = parseKiroStdout(proc.stdout);

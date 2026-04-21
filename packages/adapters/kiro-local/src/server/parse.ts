@@ -9,7 +9,7 @@
  */
 
 const RESPONSE_PREFIX_RE = /^>\s?/;
-const ANSI_RE = /\x1b\[[0-9;]*m/g;
+const ANSI_RE = /\x1b\[[?]?[0-9;]*[A-Za-z]|\x1b\].*?\x07/g;
 
 /** Matches ` ▸ Credits: 0.04 • Time: 2s` or ` ▸ Credits: 11.70 • Time: 4m 10s` on stderr */
 const CREDITS_RE = /Credits:\s*([\d.]+)/;
